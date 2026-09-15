@@ -9,6 +9,16 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 
 ---
 
+## 📌 本仓库说明（study fork）
+
+- 本仓库是 [Hz-186](https://github.com/Hz-186) 的**个人学习 fork**，仅供阅读源码、学习参考，**不是官方仓库**，与 OpenAI 无关。
+- 本仓库**不受理 Issue / Pull Request**，也不接受任何改动请求。
+- 官方渠道：[openai/codex](https://github.com/openai/codex)（源码）、[developers.openai.com/codex](https://developers.openai.com/codex)（文档）。
+- 代码导航：[CODEGRAPH.md](./CODEGRAPH.md) —— 本仓库的「代码地图」（入口架构、核心调用链、数据流、踩坑清单、关键文件跳转表）。
+- 学习分支：`study`。
+
+---
+
 ## Quickstart
 
 ### Installing and running Codex CLI

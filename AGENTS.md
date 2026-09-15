@@ -1,3 +1,90 @@
+# codex Instructions
+
+Use this file as the local operating guide for the current codebase. Prefer the code and the current CLAUDE.md over any older convention or remembered project shape.
+
+## Before Any Analysis — Code Graph First (MANDATORY)
+- **Always read `CODEGRAPH.md` at the repo root FIRST** before analyzing, modifying, or reviewing any part of this project. It is the maintained code map: the top-level and `codex-rs/` directory index, the multi-entry (tui / app-server / exec / cli-subcommand) architecture, the Session → `run_turn` engine chain and the tool dispatch chain, the config layering order, the core data flows, the pitfall list, and a jump table of high-frequency entry points.
+- After locating the involved modules via `CODEGRAPH.md`, read the relevant code's overall call chain with a code-graph approach (symbol usage/reference tracing, value-flow tracing, or an exploration subagent) — entry → middle layers → persistence/output — before drawing conclusions or making edits. Do not start with blind repo-wide searches: this workspace has ~150 crates and an unfiltered `rg` will drown you.
+- Always determine **which entry the task belongs to** (`codex-rs/tui`, `codex-rs/app-server`, `codex-rs/exec`, a `codex-rs/cli` subcommand, or the shared engine in `codex-rs/core`) before editing; the TUI no longer links `codex-core` directly — it drives an in-process app-server over the app-server protocol, so an engine-side change that has no protocol method will never reach the UI, and a TUI-side change that reaches for core types directly is rejected by the `verify_tui_core_boundary.py` CI check. Mind the easily-confused names: the `codex-cli/` npm wrapper vs the `codex-rs/cli/` Rust crate, `codex-core-api` vs `codex-api`, `codex-rs/tools/` (definitions) vs `codex-rs/core/src/tools/` (implementations).
+- If project structure changes significantly (new top-level dirs, entry convergence, port/service changes), update `CODEGRAPH.md` in the same change.
+
+## CodeGraph Index Sync (MANDATORY)
+- The local CodeGraph index lives in `.codegraph/` (machine-local, git-ignored). Whenever ANY code change has been made (edit, create, delete, rename), run `codegraph sync` at the repo root before the turn ends so the index stays current. This is mandatory after every change batch — do not skip it or defer it to the user.
+- If `codegraph` is not on PATH (expected at `D:\Users\hongze01.zhang\AppData\Local\codegraph\current\bin\codegraph.cmd` on this machine), report it and continue; never block the task on a missing index.
+
+## Git Workflow (MANDATORY)
+- **All work happens on the `study` branch.** If it does not exist locally, create it (`git checkout -b study`). Never commit directly to `main` or any other branch.
+- **Push only to `origin`** (https://github.com/Hz-186/codex.git), e.g. `git push origin study`. **Never push to `upstream`** (the openai/codex source repo) or open PRs against it.
+- Do not rebase/force-push shared branches without explicit user instruction.
+
+## Core Stance
+- Treat legacy code as liability, not as a compatibility target.
+- Prefer deletion over shims, deprecated branches, wrapper APIs, and dual-track migration notes.
+- If old and new implementations coexist, converge to one path unless an external contract forces compatibility.
+- Remove dead tests, commented-out code, stale docs, and "move later" notes instead of preserving them.
+- Reduce public surface area when a helper can be made private or internal.
+- Keep refactors centered on the owning abstraction, not on adjacent compatibility layers.
+
+## Current stack
+- Rust (edition 2024) in a single Cargo workspace `codex-rs/` (147 explicit members, plus a few implicit ones pulled in by path dependencies); toolchain pinned to `1.95.0` in `codex-rs/rust-toolchain.toml`.
+- Async runtime Tokio; HTTP via `reqwest`; model traffic over the OpenAI Responses API with SSE and WebSocket transports (`codex-rs/codex-api`, `codex-rs/codex-client`).
+- Terminal UI built with ratatui in the `codex-tui` crate, with 1000+ insta snapshots.
+- MCP via the `rmcp` crate (pinned `=3.2.0`) in `codex-rs/rmcp-client` + `codex-rs/codex-mcp`.
+- Persistence: JSONL rollout session files (`codex-rs/rollout`), a SQLite state DB (`codex-rs/state`), behind storage-neutral interfaces (`codex-rs/thread-store`).
+- Sandboxing per platform: Seatbelt on macOS, Landlock/seccomp + bubblewrap on Linux, restricted token / MXC on Windows (`codex-rs/sandboxing` and the platform crates).
+- Dual build: Cargo remains the source of truth for crates and features, Bazel provides hermetic PR verification and release artifacts (`codex-rs/docs/bazel.md`).
+- Node/pnpm side: `codex-cli/` (npm wrapper `@openai/codex`) and `sdk/typescript`; Python side: `sdk/python` (`openai-codex`) + `sdk/python-runtime`.
+
+## Code Layout to Expect
+- `codex-rs/` — the entire Rust engine and every binary. Core crates: `core/` (the `codex-core` engine: Session/Turn loop, tool routing, model client, context, rollout), `tui/`, `app-server/` + `app-server-protocol/`, `cli/`, `exec/`, `exec-server/`, `protocol/`, `config/` + `config-schema/`, `tools/`, `sandboxing/` and the Linux/Windows sandbox crates, `codex-mcp/` + `rmcp-client/`, and the persistence cluster (`rollout`, `state`, `thread-store`, `history`, `message-history`, `rollout-trace`).
+- `codex-rs/ext/` — the extension mechanism: ~15 crates registering contributor objects (guardian review, skills, memories, goal, MCP, image generation, web search) into `ExtensionRegistry`.
+- `codex-cli/` — the **npm wrapper** `@openai/codex` (`codex-cli/bin/codex.js`), not the Rust `codex-cli` crate in `codex-rs/cli/`. It only picks the platform package and spawns the native binary.
+- `sdk/typescript/`, `sdk/python/`, `sdk/python-runtime/` — SDKs; the Python SDK's protocol types are generated from the app-server schema.
+- `docs/` — mostly redirect stubs to developers.openai.com; real in-repo API docs live under `codex-rs/docs/` and `codex-rs/app-server/README.md`.
+- `scripts/` (build/release automation, `codex_package/`), `tools/` (the `argument-comment-lint` Dylint lint), `bazel/` + `third_party/` + `patches/`, `.github/` (CI, release, and the Codex agent prompts/skills in `.codex/skills/`).
+- Two directories share the name "cli" and two share "api": the npm `codex-cli/` vs the Rust `codex-rs/cli/`, and `codex-rs/core-api/` (thread-management facade over core) vs `codex-rs/codex-api/` (Responses API surface). Also note `codex-rs/windows-sandbox-rs/` is crate `codex-windows-sandbox`, and `codex-rs/utils/path-utils/` is crate `codex-utils-path`.
+
+## 注释规范（强制）
+
+本仓库的注释以「让没读过这段代码的人一遍看懂」为唯一目标，统一执行以下规则（本规范源自 ragflow study 分支的实践，风格范本见 ragflow 仓库 `rag/nlp/__init__.py`；本项目第一批注释完成后，在此登记本项目自己的范本文件）：
+
+1. **函数开头注释只写三样东西**：
+   - 一句话说明这个函数是干什么的（用大白话，可以加一个「—— 某某器/某某工」的短比喻）；
+   - **每个传入参数的含义，以及它「长得什么样子」**：用代码块/缩进给出真实的数据结构示例（例如 Python 的 dict/list 示例），让读者不用跳去别处就能想象出数据的实际形态；
+   - 返回值「长得什么样子」（同样给出真实结构示例）。
+2. **步骤说明一律写在函数体内对应代码的旁边，且必须标注真实数据长相**：
+   - 每一步做什么、为什么这么做，写成紧贴该步代码的行内/块内注释。**禁止**把一个函数的所有步骤集中堆在函数开头写成一大段「流程总览」。唯一例外：某一段逻辑本身技术含量很高、三言两语说不清，可以在那一小段代码上方多写几行把它讲透；
+   - **行内必须带真实数据示例**：关键数据处理与流转步骤，必须直接在旁边用 `[]`（列表）、`{}`（字典/JSON 对象）等具体结构展示输入、产出数据的真实长相（例如 `输入: [{"id": "c1", ...}]`，`输出: [[{"chunk_id": "c1", ...}]]`），让读者一眼看透数据如何流动与变形。
+3. **语言要求**：注释用中文，通俗易懂；禁止「这个/那个」式指代、黑话、不加解释的专有名词堆砌。原有英文注释翻译成中文；如果直译后仍然难懂，就改写成能让人看懂的版本。**只改注释，绝不改动任何代码逻辑**。
+4. **批量改写必须分批提交**：一次要改的注释太多时，先列一个待改函数清单（list），然后分多次编辑，每次只替换一部分，保证每次改动可审、可回滚。
+5. **改完必须自查**：每个文件改完后，检查是否还有「函数头大段步骤说明」残留、是否有未翻译的英文注释、关键步骤是否已带上 `[]` / `{}` 真实数据结构示例、是否有被误改的代码；必要时用子代理（subagent）复查，发现问题继续修，直到达标。
+
+## Working Rules
+- When reviewing documentation or code, inspect the full affected path and report all verifiable findings in one review; do not return after only a few findings and expose further issues in later rounds.
+- When handling review comments, independently verify each substantive claim against the current code or tests before accepting, rejecting, or acting on it.
+- Before editing, inspect the nearest code path that actually owns the behavior.
+- Keep changes small and local unless the task is explicitly a broader refactor.
+
+## Commands
+Every `just` recipe runs with `codex-rs/` as its working directory (the `justfile` sets `working-directory`), so run these from the repo root. Sources: `justfile`, `docs/install.md`, `codex-rs/docs/bazel.md`. Prerequisites: `just`, `cargo-nextest`, `cargo-insta`, `dotslash`, `rg`, Python 3, `uv` (`just install` bootstraps the toolchain); Node ≥ 22 with pnpm `10.34.5` for the JS side; Bazel `9.0.0` for Bazel paths.
+
+- Format: `just fmt` (five formatter groups in parallel: just, `cargo fmt`, buildifier via dotslash, Python SDK ruff, scripts ruff); check with `just fmt-check`.
+- Lint/fix: `just fix -p <crate>` (wraps `cargo clippy --fix --tests`), `just clippy -p <crate>` for clippy only, `just argument-comment-lint` for the custom Dylint lint.
+- Test: `just test -p <crate>` (wraps `cargo nextest run`; the repo forbids calling `cargo test` directly). Snapshots: `just test -p codex-tui`, then `cargo insta pending-snapshots -p codex-tui` / `cargo insta accept -p codex-tui`.
+- Schemas: `just write-config-schema` (regenerates `codex-rs/core/config.schema.json`, required after any `ConfigToml` change), `just write-app-server-schema [--experimental]`, `just write-hooks-schema`.
+- Bazel: `just bazel-lock-update` (required after any `Cargo.toml`/`Cargo.lock` change, commit `MODULE.bazel.lock`), `just bazel-lock-check`, `just build-for-release`.
+- Run locally: `just codex <args>`, `just exec <args>`, `just log` (tails the state SQLite DB via `codex-cli --bin logs_client`).
+- Gotcha: `just write-app-server-schema` is not a schema binary — it drives the `#[ignore]`d test `schema_fixtures_tests::write_schema_fixtures_from_env` through `app-server-protocol/scripts/write_schema_fixtures.py`.
+
+## Validation Preference
+- Run the narrowest relevant test, lint, or build command after a change; prefer a single test file over the suite.
+- Rust smoke check for the touched crate: `cargo check -p <crate>` (e.g. `cargo check -p codex-core`), then `just test -p <crate>` for behavior.
+- For comment-only changes (注释规范), tests are not required, but the file must still parse cleanly (`cargo check -p <crate>` where the change is Rust).
+- For JS/TS changes: `pnpm run format` plus the package's own lint/test (e.g. `pnpm --filter @openai/codex-sdk lint`). For Python SDK changes: run its ruff/pytest via uv as CI does.
+- Do not default to the full test suite.
+
+---
+
 # Rust/codex-rs
 
 In the codex-rs folder where the rust code lives:
@@ -33,6 +120,7 @@ In the codex-rs folder where the rust code lives:
 - Prefer private modules and explicitly exported public crate API.
 - If you change `ConfigToml` or nested config types, run `just write-config-schema` to update `codex-rs/core/config.schema.json`.
 - When working with MCP tool calls, prefer using `codex-rs/codex-mcp/src/mcp_connection_manager.rs` to handle mutation of tools and tool calls. Aim to minimize the footprint of changes and leverage existing abstractions rather than plumbing code through multiple levels of function calls.
+  - NOTE (study fork): this path is stale in the upstream text. The connection manager now lives at `codex-rs/codex-mcp/src/connection_manager.rs` (with a `connection_manager/` submodule directory); `mcp_connection_manager.rs` does not exist in this tree.
 - Do not call `reset_client_session` unnecessarily; let the incremental check logic decide whether to reuse the previous request.
 - If you change Rust dependencies (`Cargo.toml` or `Cargo.lock`), run `just bazel-lock-update` from the
   repo root to refresh `MODULE.bazel.lock`, and include that lockfile update in the same change. CI
